@@ -1,4 +1,63 @@
+// 代理状态检测功能
+function checkProxyHealth() {
+    // 创建代理状态指示器元素
+    let proxyStatusElement = document.getElementById('proxy-status-indicator');
+    if (!proxyStatusElement) {
+        proxyStatusElement = document.createElement('div');
+        proxyStatusElement.id = 'proxy-status-indicator';
+        proxyStatusElement.style.cssText = 'position: fixed; bottom: 20px; right: 20px; padding: 8px 16px; border-radius: 20px; font-size: 12px; z-index: 1000; background: #f3f4f6; color: #64748b; box-shadow: 0 2px 10px rgba(0,0,0,0.1);';
+        proxyStatusElement.textContent = '检查代理服务...';
+        document.body.appendChild(proxyStatusElement);
+    }
+    
+    // 发送健康检查请求
+    fetch('/proxy-health')
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'ok') {
+                proxyStatusElement.textContent = '代理服务: 正常';
+                proxyStatusElement.style.backgroundColor = '#d1fae5';
+                proxyStatusElement.style.color = '#065f46';
+            } else {
+                proxyStatusElement.textContent = '代理服务: 异常';
+                proxyStatusElement.style.backgroundColor = '#fee2e2';
+                proxyStatusElement.style.color = '#991b1b';
+            }
+            
+            // 3秒后隐藏状态指示器
+            setTimeout(() => {
+                proxyStatusElement.style.transition = 'opacity 0.3s ease';
+                proxyStatusElement.style.opacity = '0';
+                setTimeout(() => {
+                    if (document.body.contains(proxyStatusElement)) {
+                        document.body.removeChild(proxyStatusElement);
+                    }
+                }, 300);
+            }, 3000);
+        })
+        .catch(error => {
+            console.error('代理健康检查失败:', error);
+            proxyStatusElement.textContent = '代理服务: 无法连接';
+            proxyStatusElement.style.backgroundColor = '#fee2e2';
+            proxyStatusElement.style.color = '#991b1b';
+            
+            // 3秒后隐藏状态指示器
+            setTimeout(() => {
+                proxyStatusElement.style.transition = 'opacity 0.3s ease';
+                proxyStatusElement.style.opacity = '0';
+                setTimeout(() => {
+                    if (document.body.contains(proxyStatusElement)) {
+                        document.body.removeChild(proxyStatusElement);
+                    }
+                }, 300);
+            }, 3000);
+        });
+}
+
 document.addEventListener('DOMContentLoaded', function() {
+    // 检查代理服务健康状态
+    checkProxyHealth();
+    
     // 获取URL中的参数
     const urlParams = new URLSearchParams(window.location.search);
     const username = urlParams.get('username');
@@ -82,7 +141,7 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
         }
         
-        // 如果包含电影信息，添加iframe播放器
+        // 如果包含电影信息，添加视频播放功能
         if (movieInfo) {
             // 确保原始链接有正确的协议头
             let originalUrl = movieInfo.original_url;
@@ -90,21 +149,122 @@ document.addEventListener('DOMContentLoaded', function() {
                 originalUrl = 'https://' + originalUrl;
             }
             
+            // 使用代理URL或原始URL
+            let videoUrl = movieInfo.has_proxy && movieInfo.parsed_url ? movieInfo.parsed_url : originalUrl;
+            let proxyType = movieInfo.proxy_type || 'external';
+            
+            // 为每个视频容器生成唯一ID
+            const videoContainerId = `video-container-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+            
             messageHtml += `
-                <div class="movie-player-container">
+                <div id="${videoContainerId}" class="movie-player-container">
                     <div class="movie-player-header">
                         <span class="movie-title">电影播放</span>
                         <span class="movie-link">
                             <a href="${originalUrl}" target="_blank" rel="noopener noreferrer" style="color: #3b82f6; text-decoration: underline;">原始链接</a>
                         </span>
                     </div>
-                    <div style="text-align: center; padding: 10px; background-color: #f1f5f9; border-radius: 8px; margin-top: 10px;">
-                        <p style="color: #64748b; font-size: 14px; margin-bottom: 8px;">请点击原始链接访问电影资源</p>
-                        <div style="padding: 8px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 4px; word-break: break-all;">
-                            <small>${originalUrl}</small>
+                    <!-- 视频播放区域 -->
+                    <div class="video-player-wrapper">
+                        <video class="movie-video" controls preload="metadata" style="max-width: 100%; height: auto;">
+                            <source src="${videoUrl}" type="video/mp4">
+                            <source src="${videoUrl}" type="video/webm">
+                            <source src="${videoUrl}" type="video/ogg">
+                            您的浏览器不支持HTML5视频播放。
+                        </video>
+                        <!-- 加载指示器 -->
+                        <div class="video-loading-indicator" style="display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.7); color: white; padding: 10px 20px; border-radius: 5px;">
+                            正在加载视频...
                         </div>
                     </div>
+                    <!-- 播放状态提示 -->
+                    <div class="video-status" style="text-align: center; padding: 10px; margin-top: 5px; font-size: 13px; color: #64748b;">
+                        ${proxyType === 'self-hosted' ? '(使用自有代理服务)' : '(使用外部代理)'} 
+                    </div>
+                    <!-- 错误提示区域 -->
+                    <div class="video-error" style="display: none; text-align: center; padding: 10px; margin-top: 5px; color: #ef4444; font-size: 13px;"></div>
+                    <!-- 重试按钮 -->
+                    <div class="video-retry-container" style="display: none; text-align: center; margin-top: 5px;">
+                        <button class="retry-btn" style="background: #3b82f6; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">
+                            重试加载视频
+                        </button>
+                    </div>
+                    <!-- 备用链接显示 -->
+                    <div class="video-fallback" style="text-align: center; padding: 10px; margin-top: 5px;">
+                        <p style="color: #64748b; font-size: 14px;">如果视频无法直接播放，请点击上方原始链接</p>
+                    </div>
                 </div>
+            `;
+            
+            // 添加脚本标记以设置视频事件处理
+            messageHtml += `
+                <script>
+                (function() {
+                    const container = document.getElementById('${videoContainerId}');
+                    if (!container) return;
+                    
+                    const video = container.querySelector('.movie-video');
+                    const loadingIndicator = container.querySelector('.video-loading-indicator');
+                    const errorDiv = container.querySelector('.video-error');
+                    const retryContainer = container.querySelector('.video-retry-container');
+                    const retryBtn = container.querySelector('.retry-btn');
+                    
+                    // 视频加载开始
+                    video.addEventListener('loadstart', function() {
+                        loadingIndicator.style.display = 'block';
+                        errorDiv.style.display = 'none';
+                        retryContainer.style.display = 'none';
+                    });
+                    
+                    // 视频可播放
+                    video.addEventListener('canplay', function() {
+                        loadingIndicator.style.display = 'none';
+                    });
+                    
+                    // 视频加载错误
+                    video.addEventListener('error', function(e) {
+                        loadingIndicator.style.display = 'none';
+                        errorDiv.style.display = 'block';
+                        retryContainer.style.display = 'block';
+                        
+                        let errorMessage = '视频加载失败';
+                        switch(video.error.code) {
+                            case video.error.MEDIA_ERR_ABORTED:
+                                errorMessage = '视频加载已中止';
+                                break;
+                            case video.error.MEDIA_ERR_NETWORK:
+                                errorMessage = '网络错误导致视频加载失败';
+                                break;
+                            case video.error.MEDIA_ERR_DECODE:
+                                errorMessage = '视频解码失败';
+                                break;
+                            case video.error.MEDIA_ERR_SRC_NOT_SUPPORTED:
+                                errorMessage = '视频格式不受支持';
+                                break;
+                        }
+                        errorDiv.textContent = errorMessage;
+                    });
+                    
+                    // 重试按钮点击事件
+                    if (retryBtn) {
+                        retryBtn.addEventListener('click', function() {
+                            // 重置视频
+                            video.poster = '';
+                            video.src = '';
+                            loadingIndicator.style.display = 'block';
+                            errorDiv.style.display = 'none';
+                            retryContainer.style.display = 'none';
+                            
+                            // 重新设置视频源
+                            setTimeout(() => {
+                                video.src = video.querySelector('source').src;
+                                video.load();
+                                video.play().catch(e => console.log('Auto-play prevented:', e));
+                            }, 300);
+                        });
+                    }
+                })();
+                </script>
             `;
         }
         

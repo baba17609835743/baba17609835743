@@ -1,7 +1,10 @@
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, render_template, request, jsonify, send_from_directory, Response
 from flask_socketio import SocketIO, emit, join_room, leave_room
-import json
 import os
+import json
+import requests
+import urllib.parse
+from datetime import datetime
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
@@ -40,6 +43,76 @@ def check_username():
     """检查用户名是否已存在"""
     username = request.json.get('username')
     return jsonify({'available': username not in users})
+
+@app.route('/static/<path:path>')
+def send_static(path):
+    return send_from_directory('static', path)
+
+@app.route('/proxy-health')
+def proxy_health():
+    """代理服务健康检查端点"""
+    try:
+        return jsonify({
+            'status': 'ok',
+            'message': '代理服务运行正常',
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': f'代理服务异常: {str(e)}',
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
+@app.route('/proxy-video')
+def proxy_video():
+    """视频代理路由，解决跨域问题"""
+    try:
+        # 获取原始视频URL参数
+        original_url = request.args.get('url')
+        if not original_url:
+            return jsonify({'error': '缺少视频URL参数'}), 400
+        
+        # 解析URL以确保正确性
+        parsed_url = urllib.parse.urlparse(original_url)
+        if not parsed_url.scheme:
+            original_url = 'https://' + original_url
+        
+        # 发送请求获取视频内容
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        # 禁用SSL验证（仅用于开发环境）
+        response = requests.get(original_url, stream=True, headers=headers, verify=False)
+        
+        # 提取内容类型
+        content_type = response.headers.get('content-type', 'video/mp4')
+        
+        # 创建流式响应
+        def generate():
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    yield chunk
+        
+        # 返回响应，设置适当的CORS头
+        return Response(
+            generate(),
+            content_type=content_type,
+            headers={
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET',
+                'Access-Control-Allow-Headers': 'Content-Type',
+                'Content-Length': response.headers.get('content-length'),
+                'Accept-Ranges': response.headers.get('accept-ranges', 'bytes')
+            }
+        )
+    except requests.exceptions.RequestException as e:
+        print(f'代理请求失败: {e}')
+        return jsonify({'error': f'代理请求失败: {str(e)}'}), 500
+    except Exception as e:
+        print(f'代理处理错误: {e}')
+        return jsonify({'error': f'代理处理错误: {str(e)}'}), 500
 
 @socketio.on('connect')
 def handle_connect():
@@ -107,23 +180,31 @@ def handle_message(data):
         parts = message.split(' ', 1)
         if len(parts) > 1 and parts[0] == '@电影':
             try:
-                # 电影命令处理 - 只保留原始链接
+                # 电影命令处理 - 使用自有代理服务
                 movie_url = parts[1].strip()
                 
                 # 确保URL有协议头
                 if not movie_url.startswith(('http://', 'https://')):
                     movie_url = 'https://' + movie_url
                 
+                # 使用我们自己的代理服务
+                # 构建代理URL，将原始URL作为查询参数传递
+                base_url = request.host_url.rstrip('/')
+                proxied_url = f"{base_url}/proxy-video?url={urllib.parse.quote(movie_url)}"
+                
+                # 发送包含原始URL和代理URL的消息
                 emit('movie_request', {
                     'username': username, 
                     'original_url': movie_url,
-                    'parsed_url': movie_url  # 使用原始URL作为解析URL
+                    'parsed_url': proxied_url,  # 使用自己的代理服务URL
+                    'has_proxy': True,  # 标记使用了代理
+                    'proxy_type': 'self-hosted'  # 代理类型标记
                 }, room=ROOM_NAME, broadcast=True)
             except Exception as e:
                 print(f'处理电影命令时出错: {e}')
                 emit('new_message', {
                     'username': '系统',
-                    'message': '处理电影请求时出错',
+                    'message': f'处理电影请求时出错: {str(e)}',
                     'time': '当前时间'
                 }, room=request.sid)
             return
@@ -187,6 +268,6 @@ def handle_message(data):
 if __name__ == '__main__':
     print("Starting server...")
     try:
-        socketio.run(app, host='0.0.0.0', port=5000, debug=True)
+        socketio.run(app, host='0.0.0.0', port=5001, debug=True)
     except Exception as e:
         print("Error starting server:", str(e))

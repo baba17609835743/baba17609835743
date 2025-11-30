@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DaiP智能聊天室</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <h1>DaiP智能聊天室</h1>
+            <button id="logout-btn" class="logout-button">退出</button>
+        </div>
+        <div class="chat-content">
+            <div class="message-area" id="messageArea">
+                <!-- 消息将在这里动态显示 -->
+            </div>
+            <div class="user-list">
+                <h3>在线用户</h3>
+                <ul id="userList">
+                    <!-- 在线用户将在这里动态显示 -->
+                </ul>
+            </div>
+        </div>
+        <div class="chat-footer">
+            <div class="input-container">
+                <input type="text" id="messageInput" placeholder="输入消息... (支持@用户, @电影 url, @川小农)" autocomplete="off" autofocus>
+                <button id="emojiButton" class="emoji-button">😊</button>
+                <button id="sendButton" class="send-button">发送</button>
+            </div>
+            <div class="emoji-picker" id="emojiPicker">
+                <!-- Emoji将在这里显示 -->
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+</body>
+</html>

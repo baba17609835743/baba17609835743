@@ -54,6 +54,28 @@ function checkProxyHealth() {
         });
 }
 
+// 天气状态到背景颜色的映射
+const weatherBackgroundMap = {
+    '晴': 'linear-gradient(135deg, #fbc2eb 0%, #a6c1ee 100%)',
+    '多云': 'linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%)',
+    '阴': 'linear-gradient(135deg, #a8edea 0%, #fed6e3 100%)',
+    '小雨': 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    '中雨': 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+    '大雨': 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
+    '暴雨': 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
+    '雷阵雨': 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
+    '雪': 'linear-gradient(135deg, #e0c3fc 0%, #8ec5fc 100%)',
+    '雾': 'linear-gradient(135deg, #a8edea 0%, #fed6e3 100%)'
+};
+
+// 可用的功能提示列表
+const functionHints = [
+    { command: '@天气 城市名称', description: '查询指定城市的天气' },
+    { command: '@电影 url', description: '解析视频链接并播放' },
+    { command: '@雨姐', description: '与AI助手雨姐对话' },
+    { command: '@音乐', description: '分享音乐或使用音乐播放器' }
+];
+
 document.addEventListener('DOMContentLoaded', function() {
     // 检查代理服务健康状态
     checkProxyHealth();
@@ -67,6 +89,9 @@ document.addEventListener('DOMContentLoaded', function() {
         window.location.href = '/';
         return;
     }
+    
+    // 初始化功能提示
+    initFunctionHints();
     
     // DOM元素
     const messageArea = document.getElementById('messageArea');
@@ -91,8 +116,114 @@ document.addEventListener('DOMContentLoaded', function() {
         return `${hours}:${minutes}`;
     }
     
+    // 初始化功能提示
+    function initFunctionHints() {
+        const messageInput = document.getElementById('messageInput');
+        const chatContainer = document.querySelector('.chat-container');
+        
+        // 创建提示容器
+        let hintsContainer = document.getElementById('function-hints');
+        if (!hintsContainer) {
+            hintsContainer = document.createElement('div');
+            hintsContainer.id = 'function-hints';
+            hintsContainer.className = 'function-hints';
+            hintsContainer.style.cssText = `
+                position: absolute;
+                background: white;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                z-index: 1000;
+                max-height: 200px;
+                overflow-y: auto;
+                min-width: 300px;
+                display: none;
+            `;
+            chatContainer.appendChild(hintsContainer);
+        }
+        
+        // 输入框事件监听
+        messageInput.addEventListener('input', function(e) {
+            const value = e.target.value;
+            const cursorPos = e.target.selectionStart;
+            
+            // 检查是否在输入@符号
+            if (value.substring(0, cursorPos).endsWith('@')) {
+                showFunctionHints(hintsContainer, messageInput);
+            } else {
+                hintsContainer.style.display = 'none';
+            }
+        });
+        
+        // 点击外部关闭提示
+        document.addEventListener('click', function(e) {
+            if (!hintsContainer.contains(e.target) && e.target !== messageInput) {
+                hintsContainer.style.display = 'none';
+            }
+        });
+    }
+    
+    // 显示功能提示
+    function showFunctionHints(container, input) {
+        container.innerHTML = '';
+        
+        // 创建提示项
+        functionHints.forEach((hint, index) => {
+            const hintItem = document.createElement('div');
+            hintItem.className = 'function-hint-item';
+            hintItem.style.cssText = `
+                padding: 10px 15px;
+                cursor: pointer;
+                border-bottom: 1px solid #f0f0f0;
+                transition: background-color 0.2s;
+            `;
+            hintItem.innerHTML = `
+                <div style="font-weight: 600; color: #667eea;">${hint.command}</div>
+                <div style="font-size: 12px; color: #666; margin-top: 2px;">${hint.description}</div>
+            `;
+            
+            // 点击提示项
+            hintItem.addEventListener('click', function() {
+                const currentValue = input.value;
+                const cursorPos = input.selectionStart;
+                const newValue = currentValue.substring(0, cursorPos - 1) + hint.command + ' ';
+                input.value = newValue;
+                input.focus();
+                input.selectionStart = input.selectionEnd = newValue.length;
+                container.style.display = 'none';
+            });
+            
+            hintItem.addEventListener('mouseenter', function() {
+                this.style.backgroundColor = '#f5f5f5';
+            });
+            
+            hintItem.addEventListener('mouseleave', function() {
+                this.style.backgroundColor = 'white';
+            });
+            
+            container.appendChild(hintItem);
+        });
+        
+        // 定位提示容器
+        const rect = input.getBoundingClientRect();
+        container.style.left = `${rect.left}px`;
+        container.style.top = `${rect.top + rect.height + 5}px`;
+        container.style.display = 'block';
+    }
+    
+    // 根据天气状态更新背景
+    function updateBackgroundByWeather(weather) {
+        const body = document.body;
+        const chatContainer = document.querySelector('.chat-container');
+        
+        if (weather && weatherBackgroundMap[weather]) {
+            body.style.background = weatherBackgroundMap[weather];
+            chatContainer.style.background = 'rgba(255, 255, 255, 0.9)';
+        }
+    }
+    
     // 添加消息到消息区域
-    function addMessage(username, message, isSelf = false, isAI = false, movieInfo = null) {
+    function addMessage(username, message, isSelf = false, isAI = false, movieInfo = null, weatherData = null) {
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${isSelf ? 'self' : isAI ? 'ai' : 'other'}`;
         
@@ -111,6 +242,11 @@ document.addEventListener('DOMContentLoaded', function() {
             .replace(/@(\S+)/g, function(match, user) {
                 return `<span class="at-mention">${match}</span>`;
             });
+            
+        // 如果有天气数据，更新背景
+        if (weatherData && weatherData.weather) {
+            updateBackgroundByWeather(weatherData.weather);
+        }
         
         const time = getCurrentTime();
         
@@ -406,7 +542,7 @@ document.addEventListener('DOMContentLoaded', function() {
     
     socket.on('new_message', function(data) {
         const isSelf = data.username === username;
-        addMessage(data.username, data.message, isSelf);
+        addMessage(data.username, data.message, isSelf, data.is_ai || false, data.movie_info || null, data.weather_data || null);
     });
     
     socket.on('ai_request', function(data) {
@@ -416,7 +552,31 @@ document.addEventListener('DOMContentLoaded', function() {
     
     socket.on('ai_response', function(data) {
         // 显示AI回复消息，使用ai标记
-        addMessage(data.username, data.message, false, true);
+        // 如果有天气数据，显示天气卡片
+        addMessage(data.username, data.message, false, true, null, data.weather_data);
+        
+        // 如果有天气数据，显示天气卡片
+        if (data.weather_data) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message ai';
+            messageDiv.innerHTML = `
+                <div class="message-header">
+                    <span>${data.username}</span>
+                    <span>${getCurrentTime()}</span>
+                </div>
+                <div class="weather-card">
+                    <div style="font-size: 24px; font-weight: bold;">${data.weather_data.city} ${data.weather_data.temperature}°C</div>
+                    <div style="font-size: 16px;">${data.weather_data.weather}</div>
+                    <div style="font-size: 12px; opacity: 0.9;">湿度: ${data.weather_data.humidity}% | 风速: ${data.weather_data.wind_speed}m/s</div>
+                </div>
+            `;
+            messageArea.appendChild(messageDiv);
+            
+            // 滚动到底部
+            setTimeout(() => {
+                messageArea.scrollTop = messageArea.scrollHeight;
+            }, 10);
+        }
     });
     
     socket.on('movie_request', function(data) {

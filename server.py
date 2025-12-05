@@ -5,6 +5,7 @@ import json
 import requests
 import urllib.parse
 from datetime import datetime
+import random
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'secret!'
@@ -14,6 +15,17 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 users = {}
 # 聊天室名称
 ROOM_NAME = 'chat_room'
+# AI配置信息
+ai_config = {
+    "name": "雨姐",
+    "fallback_responses": ["砰砰砰", "娜艺那", "嗨娜娜，你卡了"],
+    "special_responses": {
+        "@雨姐": "收到消息啦！"
+    }
+}
+# 天气API配置
+WEATHER_API_KEY = "a94c22a120460d13d91d91c136c1723d"
+WEATHER_API_URL = "https://restapi.amap.com/v3/weather/weatherInfo"
 
 def load_config():
     """加载配置文件"""
@@ -169,101 +181,142 @@ def handle_join(data):
     
     print(f'{username} joined the room')
 
+def handle_weather_command(city):
+    """处理天气查询命令"""
+    try:
+        # 调用高德天气API
+        params = {
+            'key': WEATHER_API_KEY,
+            'city': city,
+            'extensions': 'base',
+            'output': 'JSON'
+        }
+        response = requests.get(WEATHER_API_URL, params=params)
+        data = response.json()
+        
+        if data['status'] == '1' and data['count'] == '1':
+            weather_info = data['lives'][0]
+            return {
+                'success': True,
+                'city': weather_info['city'],
+                'temperature': weather_info['temperature'],
+                'weather': weather_info['weather'],
+                'humidity': weather_info['humidity'],
+                'winddirection': weather_info['winddirection'],
+                'windpower': weather_info['windpower'],
+                'reporttime': weather_info['reporttime']
+            }
+        else:
+            return {'success': False, 'message': '未找到该城市的天气信息'}
+    except Exception as e:
+        print(f'天气查询错误: {e}')
+        return {'success': False, 'message': '天气查询失败，请稍后重试'}
+
+def handle_ai_command(username, command):
+    """处理AI对话命令"""
+    # 检查是否是特殊指令
+    if command in ai_config['special_responses']:
+        return ai_config['special_responses'][command]
+    
+    # 否则返回随机响应
+    return random.choice(ai_config['fallback_responses'])
+
+def handle_movie_command(url):
+    """处理电影播放命令"""
+    # 使用jx.m3u8.tv解析服务
+    parsed_url = f'https://jx.m3u8.tv/jiexi/?url={urllib.parse.quote(url)}'
+    return {
+        'original_url': url,
+        'parsed_url': parsed_url,
+        'has_proxy': True,
+        'proxy_type': 'external'
+    }
+
 @socketio.on('send_message')
 def handle_message(data):
-    """处理发送消息"""
-    username = data['username']
-    message = data['message']
+    """处理用户发送的消息"""
+    username = data.get('username')
+    message = data.get('message', '')
     
-    # 处理@命令
-    if message.startswith('@'):
+    # 处理@用户的消息
+    if '@' in message:
+        # 简单的@用户处理
+        for user in users:
+            if f'@{user}' in message:
+                message = message.replace(f'@{user}', f'<span class="at-mention">@{user}</span>')
+    
+    # 处理天气命令
+    if message.startswith('@天气'):
         parts = message.split(' ', 1)
-        if len(parts) > 1 and parts[0] == '@电影':
-            try:
-                # 电影命令处理 - 使用自有代理服务
-                movie_url = parts[1].strip()
-                
-                # 确保URL有协议头
-                if not movie_url.startswith(('http://', 'https://')):
-                    movie_url = 'https://' + movie_url
-                
-                # 使用我们自己的代理服务
-                # 构建代理URL，将原始URL作为查询参数传递
-                base_url = request.host_url.rstrip('/')
-                proxied_url = f"{base_url}/proxy-video?url={urllib.parse.quote(movie_url)}"
-                
-                # 发送包含原始URL和代理URL的消息
-                emit('movie_request', {
-                    'username': username, 
-                    'original_url': movie_url,
-                    'parsed_url': proxied_url,  # 使用自己的代理服务URL
-                    'has_proxy': True,  # 标记使用了代理
-                    'proxy_type': 'self-hosted'  # 代理类型标记
-                }, room=ROOM_NAME, broadcast=True)
-            except Exception as e:
-                print(f'处理电影命令时出错: {e}')
+        if len(parts) > 1:
+            city = parts[1].strip()
+            weather_result = handle_weather_command(city)
+            
+            if weather_result['success']:
+                weather_info = weather_result
+                weather_message = f"{weather_info['city']}天气：{weather_info['weather']}，温度{weather_info['temperature']}℃，湿度{weather_info['humidity']}%，{weather_info['winddirection']}{weather_info['windpower']}级"
                 emit('new_message', {
                     'username': '系统',
-                    'message': f'处理电影请求时出错: {str(e)}',
-                    'time': '当前时间'
-                }, room=request.sid)
-            return
-        elif len(parts) > 1 and parts[0] == '@川小农':
-            try:
-                # 提取问题内容
-                question = parts[1].strip() if len(parts) > 1 else ''
-                
-                if not question:
-                    emit('new_message', {
-                        'username': '系统',
-                        'message': '请输入您想咨询的问题',
-                        'time': '当前时间'
-                    }, room=request.sid)
-                    return
-                
-                # 模拟AI回复
-                import random
-                ai_responses = [
-                    f"您好！关于'{question}'，我的理解是...",
-                    f"感谢您的问题！关于'{question}'，我认为...",
-                    f"很高兴为您解答！'{question}'是一个很好的话题，...",
-                    f"关于'{question}'，我可以提供一些见解...",
-                    f"您的问题很有意思！关于'{question}'，我想分享..."
-                ]
-                
-                # 根据不同的问题类型生成不同的回复
-                if any(keyword in question for keyword in ['你好', '嗨', 'hello', 'hi']):
-                    ai_response = f"你好！我是川小农AI，很高兴为你服务。请问有什么可以帮助你的？"
-                elif any(keyword in question for keyword in ['谢谢', '感谢']):
-                    ai_response = "不客气！有任何问题随时问我。"
-                elif any(keyword in question for keyword in ['再见', '拜拜']):
-                    ai_response = "再见！祝您有愉快的一天！"
-                else:
-                    ai_response = random.choice(ai_responses)
-                
-                # 广播AI回复
-                emit('ai_request', {'username': username, 'query': question},
-                     room=ROOM_NAME, broadcast=True)
-                emit('ai_response', {
-                    'username': '川小农',
-                    'message': ai_response,
-                    'time': '当前时间'
-                }, room=ROOM_NAME, broadcast=True)
-            except Exception as e:
-                print(f'处理AI对话时出错: {e}')
+                    'message': weather_message,
+                    'weather_data': weather_info
+                }, room=ROOM_NAME)
+            else:
                 emit('new_message', {
                     'username': '系统',
-                    'message': '处理AI对话时出错',
-                    'time': '当前时间'
-                }, room=request.sid)
+                    'message': weather_result['message']
+                }, room=ROOM_NAME)
             return
     
-    # 发送普通消息
+    # 处理电影命令
+    if message.startswith('@电影'):
+        parts = message.split(' ', 1)
+        if len(parts) > 1:
+            movie_url = parts[1].strip()
+            movie_info = handle_movie_command(movie_url)
+            
+            # 广播电影消息
+            emit('movie_request', {
+                'username': username,
+                'original_url': movie_info['original_url'],
+                'parsed_url': movie_info['parsed_url'],
+                'has_proxy': movie_info['has_proxy'],
+                'proxy_type': movie_info['proxy_type']
+            }, room=ROOM_NAME)
+            return
+    
+    # 处理AI命令
+    if message.startswith('@雨姐'):
+        ai_response = handle_ai_command(username, '@雨姐')
+        
+        # 广播AI请求和响应
+        emit('ai_request', {
+            'username': username,
+            'query': message[3:].strip()
+        }, room=ROOM_NAME)
+        
+        # 模拟AI思考延迟
+        socketio.sleep(1)
+        
+        emit('ai_response', {
+            'username': '雨姐',
+            'message': ai_response
+        }, room=ROOM_NAME)
+        return
+    
+    # 处理音乐命令
+    if message.startswith('@音乐'):
+        # 简单的音乐命令处理，实际应用中可以更复杂
+        emit('new_message', {
+            'username': '系统',
+            'message': '音乐功能已触发，你可以分享音乐链接或使用音乐播放器'
+        }, room=ROOM_NAME)
+        return
+    
+    # 广播普通消息
     emit('new_message', {
         'username': username,
-        'message': message,
-        'time': '当前时间'
-    }, room=ROOM_NAME, broadcast=True)
+        'message': message
+    }, room=ROOM_NAME)
 
 if __name__ == '__main__':
     print("Starting server...")
